@@ -1,4 +1,4 @@
-name: BPB Worker 100% Working
+name: BPB Worker Final Solution
 
 on:
   push:
@@ -6,58 +6,49 @@ on:
   schedule:
     - cron: "0 1 * * *"
 
+permissions:
+  contents: write  # 必须的全局权限声明
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 3
 
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          persist-credentials: false  # 关键修复点
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20.x"
-          cache: ""
 
-      # 强制清除旧版本残留
-      - name: Clean install
-        run: |
-          npm uninstall -g javascript-obfuscator || true
-          npm install javascript-obfuscator@4.0.2 --no-package-lock --force
+      - name: Install Obfuscator
+        run: npm install javascript-obfuscator@4.0.2 --no-package-lock
 
       - name: Get worker source
         run: |
           curl -sSfO https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
 
-      # 终极参数格式 (已测试通过)
       - name: Obfuscate code
         run: |
-          npx javascript-obfuscator@4.0.2 unobfuscated-worker.js \
+          npx javascript-obfuscator unobfuscated-worker.js \
             --output _worker.js \
             --compact true \
-            --control-flow-flattening 0 \
             --identifier-names-generator hexadecimal \
             --rename-globals false \
-            --reserved-names "window,self,globalThis,location,fetch,Request,Response" \
             --disable-console-output true
 
-      # 最终验证步骤
-      - name: Validate output
-        run: |
-          if ! [ -f _worker.js ]; then
-            echo "❌ 文件生成失败"
-            exit 1
-          fi
-          echo "✅ 生成文件大小: $(wc -c <_worker.js) bytes"
-
-      - name: Commit changes
+      - name: Auto Commit
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: ":rocket: 100% working deploy"
-          token: ${{ secrets.GITHUB_TOKEN }}
+          commit_message: ":lock: fix permission issue"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
+          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           branch: main
           file_pattern: _worker.js
+          push_options: "--force-with-lease"
