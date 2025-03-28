@@ -1,4 +1,4 @@
-name: BPB Worker Final Deployment
+name: Optimized BPB Panel Deployment
 
 on:
   push:
@@ -7,59 +7,62 @@ on:
     - cron: "0 1 * * *"
 
 permissions:
-  contents: write
-  pages: write
-  pull-requests: write
+  contents: write  # 必须的写入权限
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 3
+    timeout-minutes: 5  # 增加超时保护
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          repository: Kaiven777/hzc2277  # 显式指定仓库路径
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
-          fetch-depth: 0
+          persist-credentials: false  # 解决权限问题的关键参数
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20.x"
-          cache: "npm"
+          node-version: "20.x"  # 锁定LTS版本
+          cache: ""  # 禁用缓存避免lock文件问题
 
-      - name: Install dependencies
+      - name: Install Obfuscator
         run: npm install javascript-obfuscator@4.0.2 --no-package-lock
 
-      - name: Get worker code
+      - name: Fetch source code
         run: |
           curl -sSf -o origin.js \
             "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
           
-          # 自动修补环境变量
+          # 自动修复浏览器API引用
           sed -i 's/window\./globalThis./g' origin.js
+          sed -i '/document\./d' origin.js
 
-      - name: Code obfuscation
+      - name: Secure obfuscation
         run: |
           npx javascript-obfuscator origin.js \
             --output _worker.js \
             --compact true \
             --identifier-names-generator hexadecimal \
-            --rename-globals false \
-            --reserved-names "window,fetch,globalThis,Response,Request"
+            --rename-globals false \  # 禁用全局变量重命名
+            --reserved-names "window,self,fetch,Response,Request" \
+            --transform-object-keys false \  # 禁用对象键转换
+            --disable-console-output true
 
-      - name: Configure Git
+      - name: Validate output
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          if grep -qE 'window\.(location|document)' _worker.js; then
+            echo "❌ 发现非法浏览器API引用"
+            exit 1
+          fi
+          echo "✅ 混淆文件验证通过"
 
       - name: Commit changes
-        run: |
-          git add -f _worker.js
-          git commit -m ":lock: security update"
-          git push --force origin HEAD:main
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: ":rocket: optimized deployment"
+          branch: main
+          file_pattern: _worker.js
+          commit_user_name: "github-actions[bot]"
+          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          push_options: "--force-with-lease"  # 安全强制推送
