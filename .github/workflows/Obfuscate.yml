@@ -9,49 +9,48 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    environment: production
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20.x"
-          cache: ""
-
-      - name: Install dependencies
-        run: npm install javascript-obfuscator@4.0.2 --global
-
-      - name: Fetch and sanitize source
+      # 关键修复：显式安装稳定版Wrangler
+      - name: Setup Wrangler
         run: |
-          # 下载原始文件
-          curl -sSf -o origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
-          
-          # 强化环境兼容处理
-          sed -i 's/window\./globalThis./g' origin.js
-          sed -i 's/document\./null?./g' origin.js
-          sed -i 's/typeof window/"undefined"/g' origin.js  # 强制环境检测
+          npm install -g wrangler@3.19.0 --legacy-peer-deps
+          wrangler --version
 
-      - name: Secure obfuscation
+      - name: Generate config
+        run: |
+          cat << EOF > wrangler.toml
+          name = "bpb-worker"
+          compatibility_date = "2024-05-20"
+          main = "_worker.js"
+          EOF
+
+      - name: Prepare source
+        run: |
+          curl -sSf -o origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
+          sed -i 's/window\./globalThis./g' origin.js
+
+      - name: Build worker
         run: |
           npx javascript-obfuscator@4.0.2 origin.js \
             --output _worker.js \
             --compact true \
-            --identifier-names-generator hexadecimal \
-            --rename-globals false \
-            --reserved-names "window,document,self,globalThis,location,fetch,caches,Response,Request" \
-            --reserved-strings "/window|document|location/" \
-            --disable-console-output true
+            --reserved-names "fetch,Request,Response" \
+            --rename-globals false
 
-      - name: Add environment polyfill
-        run: |
-          # 在生成文件头部插入环境垫片
-          sed -i '1i// Cloudflare Worker Polyfill\nconst window = globalThis;\nconst document = { cookie: "" };\n' _worker.js
-
+      # 增强型部署配置
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@3.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: pages deploy _worker.js --project-name=your-project-name
+          command: |
+            pages deploy _worker.js \
+            --project-name=your-project-name \
+            --branch=main \
+            --env=production
+        continue-on-error: false
