@@ -1,4 +1,4 @@
-name: BPB Worker Final Solution
+name: BPB Worker Final Deployment
 
 on:
   push:
@@ -7,48 +7,59 @@ on:
     - cron: "0 1 * * *"
 
 permissions:
-  contents: write  # 必须的全局权限声明
+  contents: write
+  pages: write
+  pull-requests: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 3
 
     steps:
-      - name: Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
-          persist-credentials: false  # 关键修复点
+          repository: Kaiven777/hzc2277  # 显式指定仓库路径
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
           fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20.x"
+          cache: "npm"
 
-      - name: Install Obfuscator
+      - name: Install dependencies
         run: npm install javascript-obfuscator@4.0.2 --no-package-lock
 
-      - name: Get worker source
+      - name: Get worker code
         run: |
-          curl -sSfO https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
+          curl -sSf -o origin.js \
+            "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
+          
+          # 自动修补环境变量
+          sed -i 's/window\./globalThis./g' origin.js
 
-      - name: Obfuscate code
+      - name: Code obfuscation
         run: |
-          npx javascript-obfuscator unobfuscated-worker.js \
+          npx javascript-obfuscator origin.js \
             --output _worker.js \
             --compact true \
             --identifier-names-generator hexadecimal \
             --rename-globals false \
-            --disable-console-output true
+            --reserved-names "window,fetch,globalThis,Response,Request"
 
-      - name: Auto Commit
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: ":lock: fix permission issue"
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-          branch: main
-          file_pattern: _worker.js
-          push_options: "--force-with-lease"
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      - name: Commit changes
+        run: |
+          git add -f _worker.js
+          git commit -m ":lock: security update"
+          git push --force origin HEAD:main
