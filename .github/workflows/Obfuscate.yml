@@ -1,4 +1,4 @@
-name: BPB Worker Ultimate Fix
+name: BPB Worker Success Deploy
 
 on:
   push:
@@ -14,8 +14,6 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -23,24 +21,28 @@ jobs:
           node-version: "20.x"
           cache: ""
 
-      - name: Install Obfuscator
-        run: npm install javascript-obfuscator@4.0.2 --no-package-lock
+      # 关键修复：精确控制依赖版本
+      - name: Install exact version
+        run: npm install javascript-obfuscator@4.0.2 --no-package-lock --global-style
 
       - name: Get worker source
         run: |
           curl -sSfO https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
 
+      # 使用JSON格式参数避免解析错误
       - name: Obfuscate code
         run: |
-          npx javascript-obfuscator unobfuscated-worker.js \
+          npx javascript-obfuscator@4.0.2 unobfuscated-worker.js \
             --output _worker.js \
-            --compact true \
-            --identifier-names-generator hexadecimal \
-            --rename-globals false \
-            --disable-console-output  # 正确布尔参数格式
+            --options '{
+              "compact": true,
+              "identifierNamesGenerator": "hexadecimal",
+              "renameGlobals": false,
+              "disableConsoleOutput": true
+            }'
 
       - name: Commit changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: ":zap: ultimate fix"
+          commit_message: ":white_check_mark: success deploy"
           token: ${{ secrets.GITHUB_TOKEN }}
