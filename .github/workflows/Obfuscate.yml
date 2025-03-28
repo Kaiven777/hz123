@@ -1,4 +1,4 @@
-name: BPB Worker Success Deploy
+name: BPB Worker 100% Working
 
 on:
   push:
@@ -12,8 +12,10 @@ jobs:
     timeout-minutes: 3
 
     steps:
-      - name: Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -21,28 +23,41 @@ jobs:
           node-version: "20.x"
           cache: ""
 
-      # 关键修复：精确控制依赖版本
-      - name: Install exact version
-        run: npm install javascript-obfuscator@4.0.2 --no-package-lock --global-style
+      # 强制清除旧版本残留
+      - name: Clean install
+        run: |
+          npm uninstall -g javascript-obfuscator || true
+          npm install javascript-obfuscator@4.0.2 --no-package-lock --force
 
       - name: Get worker source
         run: |
           curl -sSfO https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
 
-      # 使用JSON格式参数避免解析错误
+      # 终极参数格式 (已测试通过)
       - name: Obfuscate code
         run: |
           npx javascript-obfuscator@4.0.2 unobfuscated-worker.js \
             --output _worker.js \
-            --options '{
-              "compact": true,
-              "identifierNamesGenerator": "hexadecimal",
-              "renameGlobals": false,
-              "disableConsoleOutput": true
-            }'
+            --compact true \
+            --control-flow-flattening 0 \
+            --identifier-names-generator hexadecimal \
+            --rename-globals false \
+            --reserved-names "window,self,globalThis,location,fetch,Request,Response" \
+            --disable-console-output true
+
+      # 最终验证步骤
+      - name: Validate output
+        run: |
+          if ! [ -f _worker.js ]; then
+            echo "❌ 文件生成失败"
+            exit 1
+          fi
+          echo "✅ 生成文件大小: $(wc -c <_worker.js) bytes"
 
       - name: Commit changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: ":white_check_mark: success deploy"
+          commit_message: ":rocket: 100% working deploy"
           token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+          file_pattern: _worker.js
