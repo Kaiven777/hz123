@@ -1,65 +1,37 @@
-name: Cloudflare Worker Production Deploy
+name: Cloudflare Worker Final Fix
 
 on:
   push:
     branches: [main]
 
-env:
-  CF_PROJECT_NAME: "your-project-name"  # 必须更改为实际项目名称
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: production
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 关键修复：独立安装最新稳定版Wrangler
-      - name: Setup Wrangler
+      # 关键修复：使用统一分隔符
+      - name: Prepare source
         run: |
-          npm install -g wrangler@3.19.0 --legacy-peer-deps
-          wrangler --version
-
-      # 强制生成配置文件
-      - name: Create wrangler config
-        run: |
-          cat << EOF > wrangler.toml
-          name = "${{ env.CF_PROJECT_NAME }}"
-          compatibility_date = "$(date +'%Y-%m-%d')"
-          main = "_worker.js"
-          EOF
-
-      - name: Prepare worker code
-        run: |
-          # 下载原始文件并强化兼容处理
-          curl -sSf -o origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
+          curl -sSf -o origin.js https://example.com/source.js
           
-          # 彻底替换浏览器API引用
-          sed -i 's/window\./globalThis./g' origin.js
-          sed -i 's/document\./null?.//g' origin.js
-          sed -i 's/localStorage//g' origin.js
+          # 使用#作为分隔符避免转义问题
+          sed -i 's#window\.#globalThis.#g' origin.js
+          sed -i 's#document\.#null?.#g' origin.js
+          sed -i '/localStorage/d' origin.js
 
-      # 安全混淆配置
       - name: Build worker
         run: |
-          npx javascript-obfuscator@4.0.2 origin.js \
+          npx javascript-obfuscator origin.js \
             --output _worker.js \
             --compact true \
-            --rename-globals false \
-            --reserved-names "fetch,Response,Request,caches" \
-            --transform-object-keys false
+            --rename-globals false
 
-      # 增强型部署命令
-      - name: Deploy to Cloudflare
+      - name: Deploy to CF
         uses: cloudflare/wrangler-action@3.0.0
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: |
-            wrangler pages deploy _worker.js \
-              --project-name=${{ env.CF_PROJECT_NAME }} \
-              --branch=main \
-              --commit-dirty=true \
-              --verbose
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          command: pages deploy _worker.js --project-name=my-project
