@@ -1,13 +1,10 @@
-name: BPB Worker Safe Deploy
+name: BPB Worker Stable Deploy
 
 on:
   push:
     branches: [main]
   schedule:
     - cron: "0 1 * * *"
-
-permissions:
-  contents: write
 
 jobs:
   deploy:
@@ -27,37 +24,22 @@ jobs:
       - name: Get worker source
         run: |
           curl -sSf -o origin.js \
-          "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
-          
-      - name: Add environment polyfill
-        run: |
-          # 在原始文件头部插入环境兼容代码
-          sed -i '1i\if (typeof window === "undefined") { globalThis.window = { location: { href: "" }, addEventListener: () => {} } }' origin.js
-          sed -i '2i\const isBrowser = false; // Force worker environment' origin.js
+            "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
 
+      # 修复点：使用单行命令模式
       - name: Obfuscate code
         run: |
-          npx javascript-obfuscator@4.0.2 origin.js \
-            --output _worker.js \
-            --compact true \
-            --identifier-names-generator hexadecimal \
-            --rename-globals false \  # 关键修改：禁用全局变量重命名
-            --reserved-names 'window,self,isBrowser,fetch,Request,Response,addEventListener' \
-            --reserved-strings '/window|location|href/' \
-            --transform-object-keys false \
-            --disable-console-output true
+          npx javascript-obfuscator@4.0.2 origin.js --output _worker.js --compact true --identifier-names-generator hexadecimal --rename-globals false --reserved-names "window,self,isBrowser,globalThis,fetch,Request,Response,addEventListener" --reserved-strings "/window|location|href/" --transform-object-keys false --disable-console-output true
 
       - name: Validate worker
         run: |
-          # 检查生成文件是否包含非法引用
           if grep -qE 'window\.(location|document)' _worker.js; then
-            echo "❌ 发现非法浏览器API引用"
+            echo "❌ 浏览器API检测失败"
             exit 1
           fi
-          echo "✅ 环境验证通过"
 
       - name: Git commit
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: ":shield: fix worker environment"
+          commit_message: ":white_check_mark: stable deploy"
           file_pattern: "_worker.js"
