@@ -1,4 +1,4 @@
-name: Ultimate BPB Deployment
+name: BPB Worker Ultimate Success
 
 on:
   push:
@@ -6,52 +6,61 @@ on:
   schedule:
     - cron: "0 1 * * *"
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
+      # 步骤1: 代码检出（强制刷新凭证）
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          clean: true
+          fetch-depth: 0
 
+      # 步骤2: 设置Node.js环境（精确版本控制）
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20.x"
+          node-version: "20.19.1"
           cache: ""
 
-      - name: Install exact version
-        run: npm install javascript-obfuscator@4.0.2 --no-package-lock
+      # 步骤3: 安装混淆器（无lock文件）
+      - name: Install dependencies
+        run: npm install javascript-obfuscator@4.0.2 --global --no-package-lock
 
-      - name: Fetch source
+      # 步骤4: 获取并预处理源码
+      - name: Prepare source code
         run: |
-          curl -sSf -o origin.js \
-            "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
+          curl -sSf -o origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
           
-          # 自动修复环境变量
-          sed -i 's/window\./globalThis./g' origin.js
+          # 关键修复：浏览器API替换
+          sed -i 's/window\.location/globalThis.location/g' origin.js
+          sed -i '/document\./d' origin.js
 
-      # 关键修复：单行参数格式
+      # 步骤5: 单行混淆命令（解决参数解析问题）
       - name: Obfuscate code
-        run: |
-          npx javascript-obfuscator@4.0.2 origin.js --output _worker.js --compact true --identifier-names-generator hexadecimal --rename-globals false --reserved-names "window,self,globalThis,fetch,Response,Request" --transform-object-keys false --disable-console-output true
+        run: npx javascript-obfuscator@4.0.2 origin.js --output _worker.js --compact true --identifier-names-generator hexadecimal --rename-globals false --reserved-names "window,self,fetch,Request,Response" --disable-console-output true
 
-      - name: Validate output
+      # 步骤6: 原生Git操作（解决403权限问题）
+      - name: Commit and push
         run: |
-          if [ ! -f _worker.js ]; then
-            echo "❌ 文件生成失败"
-            exit 1
-          fi
-          echo "✅ 生成文件大小: $(wc -c <_worker.js) bytes"
-
-      - name: Commit changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: ":white_check_mark: ultimate fix"
-          branch: main
-          file_pattern: _worker.js
-          commit_user_name: "github-actions[bot]"
-          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          # 配置Git身份
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 强制添加文件
+          git add -f _worker.js
+          
+          # 生成合规提交信息
+          TIMESTAMP=$(date +"%Y-%m-%dT%H:%M:%S%z")
+          git commit -m ":rocket: Auto deploy [${TIMESTAMP}]" --allow-empty
+          
+          # 使用Token进行推送认证
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git push origin main --force
