@@ -1,4 +1,4 @@
-name: Cloudflare Worker Final Fix
+name: Cloudflare Worker Final Deploy
 
 on:
   push:
@@ -13,28 +13,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 关键修复：独立安装并锁定 Wrangler 版本
+      # 关键修复：独立安装并锁定版本
       - name: Install Wrangler
         run: |
-          npm install -g wrangler@3.19.0 --prefix=$HOME/.local --legacy-peer-deps --no-audit
+          npm install -g wrangler@3.19.0 --prefix=$HOME/.local --legacy-peer-deps
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-          wrangler --version
 
-      # 绕过官方 Action 的安装步骤
-      - name: Deploy to Cloudflare
-        shell: bash
+      # 安全认证配置
+      - name: Configure Cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          # 验证 Wrangler 版本
-          if ! wrangler --version | grep -q '3.19.0'; then
-            echo "❌ Wrangler 版本不匹配"
+          # 强制验证Token有效性
+          if ! wrangler whoami 2>&1 | grep -q "successfully authenticated"; then
+            echo "❌ Cloudflare认证失败，请检查："
+            echo "1. CLOUDFLARE_API_TOKEN是否已添加到仓库Secrets"
+            echo "2. Token是否具有Pages和Workers的编辑权限"
             exit 1
           fi
 
-          # 执行部署命令
+      # 增强型部署命令
+      - name: Deploy Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
           wrangler pages deploy _worker.js \
             --project-name=YOUR_PROJECT_NAME \
             --branch=main \
             --commit-dirty \
-            --no-bundle
+            --no-bundle \
+            --verbose
