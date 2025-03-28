@@ -1,4 +1,4 @@
-name: BPB Worker Ultimate Success
+name: BPB Panel Final Solution
 
 on:
   push:
@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   build:
@@ -16,51 +15,39 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      # 步骤1: 代码检出（强制刷新凭证）
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          clean: true
-          fetch-depth: 0
+          persist-credentials: false
 
-      # 步骤2: 设置Node.js环境（精确版本控制）
+      # 关键修复：使用标准LTS版本
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20.19.1"
+          node-version: "20.x"  # 自动选择最新的20.x版本
           cache: ""
 
-      # 步骤3: 安装混淆器（无lock文件）
       - name: Install dependencies
         run: npm install javascript-obfuscator@4.0.2 --global --no-package-lock
 
-      # 步骤4: 获取并预处理源码
-      - name: Prepare source code
+      - name: Fetch source code
         run: |
-          curl -sSf -o origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
+          curl -sSf -o origin.js \
+            "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
           
-          # 关键修复：浏览器API替换
-          sed -i 's/window\.location/globalThis.location/g' origin.js
-          sed -i '/document\./d' origin.js
+          # 浏览器API兼容处理
+          sed -i 's/window\./globalThis./g' origin.js
 
-      # 步骤5: 单行混淆命令（解决参数解析问题）
+      # 单行参数确保解析正确
       - name: Obfuscate code
-        run: npx javascript-obfuscator@4.0.2 origin.js --output _worker.js --compact true --identifier-names-generator hexadecimal --rename-globals false --reserved-names "window,self,fetch,Request,Response" --disable-console-output true
+        run: npx javascript-obfuscator@4.0.2 origin.js --output _worker.js --compact true --identifier-names-generator hexadecimal --rename-globals false --reserved-names "window,self,fetch,Response,Request" --disable-console-output true
 
-      # 步骤6: 原生Git操作（解决403权限问题）
+      # 原生Git操作解决方案
       - name: Commit and push
         run: |
-          # 配置Git身份
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # 强制添加文件
           git add -f _worker.js
-          
-          # 生成合规提交信息
-          TIMESTAMP=$(date +"%Y-%m-%dT%H:%M:%S%z")
-          git commit -m ":rocket: Auto deploy [${TIMESTAMP}]" --allow-empty
-          
-          # 使用Token进行推送认证
+          git commit -m ":rocket: $(date +'%Y-%m-%d %H:%M:%S') update"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git push origin main --force
