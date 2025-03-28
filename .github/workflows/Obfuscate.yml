@@ -1,8 +1,10 @@
-name: Cloudflare Worker Final Fix
+name: BPB Panel Final Solution
 
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "0 1 * * *"
 
 jobs:
   deploy:
@@ -13,25 +15,57 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 关键修复：使用统一分隔符
-      - name: Prepare source
+      # 关键修复：动态计算原始文件路径
+      - name: Validate source URL
+        id: validate_url
         run: |
-          curl -sSf -o origin.js https://example.com/source.js
+          BRANCH="main"  # 确认仓库分支名称
+          FILE_PATH="build/unobfuscated-worker.js"  # 目标文件路径
+          RAW_URL="https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/$BRANCH/$FILE_PATH"
           
-          # 使用#作为分隔符避免转义问题
-          sed -i 's#window\.#globalThis.#g' origin.js
-          sed -i 's#document\.#null?.#g' origin.js
-          sed -i '/localStorage/d' origin.js
+          # 增加超时和重试机制
+          if curl --output /dev/null --silent --head --fail --retry 3 --max-time 10 "$RAW_URL"; then
+            echo "url_valid=true" >> $GITHUB_OUTPUT
+            echo "source_url=$RAW_URL" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 验证失败：文件路径不存在 ($RAW_URL)"
+            echo "请在仓库 https://github.com/bia-pain-bache/BPB-Worker-Panel 确认文件是否存在"
+            exit 1
+          fi
+
+      # 安全下载（增加重试和校验）
+      - name: Download source
+        run: |
+          curl -sSf \
+            --retry 3 \
+            --max-time 30 \
+            -o origin.js \
+            "${{ steps.validate_url.outputs.source_url }}"
+          
+          # 文件完整性校验
+          if [ ! -s origin.js ]; then
+            echo "❌ 下载失败：文件为空"
+            exit 1
+          fi
+
+      - name: Environment patches
+        run: |
+          # 统一使用无冲突分隔符
+          sed -i "s|window.location|globalThis.location|g" origin.js
+          sed -i "/document./d" origin.js
+          
+          # 添加Cloudflare Worker环境标识
+          echo "//# sourceMappingURL=cloudflare-worker.js" >> origin.js
 
       - name: Build worker
         run: |
           npx javascript-obfuscator origin.js \
             --output _worker.js \
             --compact true \
-            --rename-globals false
+            --reserved-names "globalThis,fetch,caches,Response,Request"
 
-      - name: Deploy to CF
+      - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@3.0.0
         with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          command: pages deploy _worker.js --project-name=my-project
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: pages deploy _worker.js --project-name=YOUR_PROJECT_NAME
