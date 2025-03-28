@@ -1,4 +1,4 @@
-name: BPB Worker Stable Deploy
+name: BPB Worker Final Deploy
 
 on:
   push:
@@ -24,22 +24,35 @@ jobs:
       - name: Get worker source
         run: |
           curl -sSf -o origin.js \
-            "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
+          "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
+          
+          # 自动修复浏览器API引用
+          sed -i 's/window\.location/globalThis.location/g' origin.js
+          sed -i 's/document\./null?./g' origin.js
 
-      # 修复点：使用单行命令模式
       - name: Obfuscate code
         run: |
-          npx javascript-obfuscator@4.0.2 origin.js --output _worker.js --compact true --identifier-names-generator hexadecimal --rename-globals false --reserved-names "window,self,isBrowser,globalThis,fetch,Request,Response,addEventListener" --reserved-strings "/window|location|href/" --transform-object-keys false --disable-console-output true
+          npx javascript-obfuscator@4.0.2 origin.js \
+            --output _worker.js \
+            --compact true \
+            --identifier-names-generator hexadecimal \
+            --rename-globals false \
+            --reserved-names "window,document,self,globalThis,location,fetch,Request,Response,addEventListener" \
+            --reserved-strings "/(window|document|location)\\./" \
+            --transform-object-keys false \
+            --disable-console-output true
 
       - name: Validate worker
         run: |
-          if grep -qE 'window\.(location|document)' _worker.js; then
-            echo "❌ 浏览器API检测失败"
+          if grep -nE 'window\.(location|document|addEventListener)|document\.' _worker.js; then
+            echo "❌ 发现非法浏览器API引用，请修改原始代码！"
             exit 1
+          else
+            echo "✅ 环境兼容性验证通过"
           fi
 
       - name: Git commit
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: ":white_check_mark: stable deploy"
+          commit_message: ":green_heart: final fix"
           file_pattern: "_worker.js"
