@@ -1,13 +1,14 @@
-name: Cloudflare Worker Safe Deploy
+name: Cloudflare Worker Production Deploy
 
 on:
   push:
     branches: [main]
-  schedule:
-    - cron: "0 1 * * *"
+
+env:
+  CF_PROJECT_NAME: "your-project-name"  # 必须更改为实际项目名称
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
@@ -16,41 +17,49 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 关键修复：显式安装稳定版Wrangler
+      # 关键修复：独立安装最新稳定版Wrangler
       - name: Setup Wrangler
         run: |
           npm install -g wrangler@3.19.0 --legacy-peer-deps
           wrangler --version
 
-      - name: Generate config
+      # 强制生成配置文件
+      - name: Create wrangler config
         run: |
           cat << EOF > wrangler.toml
-          name = "bpb-worker"
-          compatibility_date = "2024-05-20"
+          name = "${{ env.CF_PROJECT_NAME }}"
+          compatibility_date = "$(date +'%Y-%m-%d')"
           main = "_worker.js"
           EOF
 
-      - name: Prepare source
+      - name: Prepare worker code
         run: |
+          # 下载原始文件并强化兼容处理
           curl -sSf -o origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
+          
+          # 彻底替换浏览器API引用
           sed -i 's/window\./globalThis./g' origin.js
+          sed -i 's/document\./null?.//g' origin.js
+          sed -i 's/localStorage//g' origin.js
 
+      # 安全混淆配置
       - name: Build worker
         run: |
           npx javascript-obfuscator@4.0.2 origin.js \
             --output _worker.js \
             --compact true \
-            --reserved-names "fetch,Request,Response" \
-            --rename-globals false
+            --rename-globals false \
+            --reserved-names "fetch,Response,Request,caches" \
+            --transform-object-keys false
 
-      # 增强型部署配置
+      # 增强型部署命令
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@3.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: |
-            pages deploy _worker.js \
-            --project-name=your-project-name \
-            --branch=main \
-            --env=production
-        continue-on-error: false
+            wrangler pages deploy _worker.js \
+              --project-name=${{ env.CF_PROJECT_NAME }} \
+              --branch=main \
+              --commit-dirty=true \
+              --verbose
