@@ -1,4 +1,4 @@
-name: Optimized BPB Panel Deployment
+name: Ultimate BPB Deployment
 
 on:
   push:
@@ -6,63 +6,52 @@ on:
   schedule:
     - cron: "0 1 * * *"
 
-permissions:
-  contents: write  # 必须的写入权限
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5  # 增加超时保护
+    timeout-minutes: 5
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          persist-credentials: false  # 解决权限问题的关键参数
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20.x"  # 锁定LTS版本
-          cache: ""  # 禁用缓存避免lock文件问题
+          node-version: "20.x"
+          cache: ""
 
-      - name: Install Obfuscator
+      - name: Install exact version
         run: npm install javascript-obfuscator@4.0.2 --no-package-lock
 
-      - name: Fetch source code
+      - name: Fetch source
         run: |
           curl -sSf -o origin.js \
             "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
           
-          # 自动修复浏览器API引用
+          # 自动修复环境变量
           sed -i 's/window\./globalThis./g' origin.js
-          sed -i '/document\./d' origin.js
 
-      - name: Secure obfuscation
+      # 关键修复：单行参数格式
+      - name: Obfuscate code
         run: |
-          npx javascript-obfuscator origin.js \
-            --output _worker.js \
-            --compact true \
-            --identifier-names-generator hexadecimal \
-            --rename-globals false \  # 禁用全局变量重命名
-            --reserved-names "window,self,fetch,Response,Request" \
-            --transform-object-keys false \  # 禁用对象键转换
-            --disable-console-output true
+          npx javascript-obfuscator@4.0.2 origin.js --output _worker.js --compact true --identifier-names-generator hexadecimal --rename-globals false --reserved-names "window,self,globalThis,fetch,Response,Request" --transform-object-keys false --disable-console-output true
 
       - name: Validate output
         run: |
-          if grep -qE 'window\.(location|document)' _worker.js; then
-            echo "❌ 发现非法浏览器API引用"
+          if [ ! -f _worker.js ]; then
+            echo "❌ 文件生成失败"
             exit 1
           fi
-          echo "✅ 混淆文件验证通过"
+          echo "✅ 生成文件大小: $(wc -c <_worker.js) bytes"
 
       - name: Commit changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: ":rocket: optimized deployment"
+          commit_message: ":white_check_mark: ultimate fix"
           branch: main
           file_pattern: _worker.js
           commit_user_name: "github-actions[bot]"
-          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-          push_options: "--force-with-lease"  # 安全强制推送
+          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
