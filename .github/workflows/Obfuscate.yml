@@ -1,4 +1,4 @@
-name: BPB Worker Auto Deploy
+name: BPB Worker Ultimate Fix
 
 on:
   push:
@@ -7,39 +7,36 @@ on:
     - cron: "0 1 * * *"
 
 permissions:
-  contents: write
-  pages: write
+  contents: write  # 必须的写入权限
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          persist-credentials: true  # 关键修复：启用凭证持久化
+          fetch-depth: 0
 
-      # 关键修复：禁用缓存
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20.x"
-          cache: ""  # 明确禁用缓存
+          cache: ""
 
       - name: Install dependencies
-        run: |
-          npm install -g javascript-obfuscator@4.0.2 --no-package-lock
+        run: npm install -g javascript-obfuscator@4.0.2 --no-package-lock
 
-      - name: Fetch source code
+      - name: Fetch source
         run: |
           curl -sSf -o origin.js \
             "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
           
           # 环境兼容处理
           sed -i 's/window\./globalThis./g' origin.js
-          sed -i '/document\./d' origin.js
 
       - name: Obfuscate code
         run: |
@@ -48,12 +45,22 @@ jobs:
             --compact true \
             --identifier-names-generator hexadecimal \
             --rename-globals false \
-            --reserved-names "fetch,Response,Request,caches"
+            --reserved-names "fetch,Response,Request"
 
-      - name: Auto commit
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          branch: main
-          commit_message: ":rocket: auto update"
-          file_pattern: _worker.js
-          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+      # 关键修复：原生Git操作替代三方Action
+      - name: Commit and push
+        run: |
+          # 配置Git身份
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 强制添加文件
+          git add -f _worker.js
+          
+          # 生成时间戳提交信息
+          TIMESTAMP=$(date +"%Y-%m-%dT%H:%M:%S%z")
+          git commit -m "🔧 Auto update [$TIMESTAMP]" --allow-empty
+          
+          # 使用Token认证推送
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git push origin main -f
