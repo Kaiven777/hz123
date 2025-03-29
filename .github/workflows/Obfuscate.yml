@@ -1,4 +1,4 @@
-name: Cloudflare Pages Secure Deploy
+name: Cloudflare Pages Auto Deploy
 
 on:
   push:
@@ -7,63 +7,54 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     environment: production
 
-    # 统一的全局环境变量声明（经严格验证）
     env:
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CF_PROJECT_NAME: "your-project-name"  # 需替换为实际项目名称
+      CF_PROJECT_NAME: "hz123"  # 你的项目名称
 
     steps:
-      # 1. 检出代码并验证存储库结构
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          clean: true
           fetch-depth: 0
-          show-progress: true
 
-      # 2. 强化网络请求设置
-      - name: Prepare environment
+      - name: Install Wrangler (v4.6.0)
         run: |
-          # 防止请求中断
-          git config --global http.postBuffer 524288000
-          curl --version
+          npm install -g wrangler@4.6.0 --legacy-peer-deps
+          wrangler --version
 
-      # 3. 独立认证配置步骤
-      - name: Configure Auth
+      - name: Create Wrangler Config
         run: |
           cat << EOF > wrangler.toml
           name = "$CF_PROJECT_NAME"
           main = "_worker.js"
           compatibility_date = "$(date +'%Y-%m-%d')"
           account_id = "$CF_ACCOUNT_ID"
-          workers_dev = true
+          node_compat = true
           EOF
 
-          # 验证配置有效性
-          [ -s wrangler.toml ] || (echo "❌ 配置文件生成失败" && exit 1)
-
-      # 4. 版本锁定安装
-      - name: Install Wrangler (strict)
+      - name: Auth Validation
         run: |
-          npm install -g wrangler@3.19.0 --legacy-peer-deps --no-audit
-          wrangler --version | grep "3.19.0" || (echo "❌ 版本不匹配" && exit 1)
+          if [ -z "$CF_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN未设置，请检查仓库Secrets"
+            exit 1
+          fi
+          
+          if ! wrangler whoami | grep -q "Account ID: $CF_ACCOUNT_ID"; then
+            echo "::error::认证失败，请检查："
+            echo "1. Token是否包含 Workers Pages 和 Scripts 的 Edit 权限"
+            echo "2. 账户ID是否正确"
+            exit 1
+          fi
 
-      # 5. 原子化部署步骤（解决环境变量继承问题）
-      - name: Deploy with isolation
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ env.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ env.CF_ACCOUNT_ID }}
+      - name: Deploy to hz123.pages.dev
         run: |
-          # 打印验证信息（调试用）
-          wrangler whoami 2>&1 | grep "$CF_ACCOUNT_ID" || (echo "❌ 账户认证失败" && exit 1)
-
-          # 正式部署命令
           wrangler pages deploy _worker.js \
-            --project-name "$CF_PROJECT_NAME" \
-            --branch main \
+            --project-name="$CF_PROJECT_NAME" \
+            --branch=main \
             --commit-dirty \
-            --env production \
-            --log-level debug
+            --no-bundle
