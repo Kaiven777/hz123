@@ -1,10 +1,8 @@
-name: Cloudflare Worker Auto Deploy
+name: Cloudflare Pages Final Fix
 
 on:
   push:
     branches: [main]
-  schedule:
-    - cron: "0 1 * * *"
 
 jobs:
   deploy:
@@ -12,43 +10,31 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # 1. 检出代码
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 安装指定版本Wrangler
+      # 关键修复：生成正确的配置文件
+      - name: Create config
+        run: |
+          cat << EOF > wrangler.toml
+          name = "YOUR_PROJECT_NAME"
+          account_id = "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
+          main = "_worker.js"
+          compatibility_date = "$(date +'%Y-%m-%d')"
+          EOF
+
       - name: Install Wrangler
         run: |
-          npm install -g wrangler@3.19.0 --legacy-peer-deps
+          npm install -g wrangler@3.19.0
           wrangler --version
 
-      # 3. 获取并预处理源码
-      - name: Prepare Worker
-        run: |
-          curl -sSf -o origin.js \
-            "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
-          
-          # 浏览器API兼容处理
-          sed -i 's/window\./globalThis./g' origin.js
-          sed -i '/document\./d' origin.js
-
-      # 4. 混淆代码
-      - name: Obfuscate Code
-        run: |
-          npx javascript-obfuscator origin.js \
-            --output _worker.js \
-            --compact true \
-            --rename-globals false \
-            --reserved-names "fetch,Response,Request,caches"
-
-      # 5. 部署到Cloudflare
+      # 修复后的部署命令
       - name: Deploy to Cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           wrangler pages deploy _worker.js \
             --project-name=YOUR_PROJECT_NAME \
-            --account-id=$CLOUDFLARE_ACCOUNT_ID \
+            --branch=main \
             --commit-dirty \
             --no-bundle
