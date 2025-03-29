@@ -1,4 +1,4 @@
-name: BPB Worker Production
+name: BPB Worker Auto Deploy
 
 on:
   push:
@@ -15,26 +15,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
+      # 关键修复：禁用缓存
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20.x"
-          cache: "npm"
+          cache: ""  # 明确禁用缓存
 
       - name: Install dependencies
-        run: npm install -g javascript-obfuscator@4.0.2
+        run: |
+          npm install -g javascript-obfuscator@4.0.2 --no-package-lock
 
-      - name: Fetch source
+      - name: Fetch source code
         run: |
           curl -sSf -o origin.js \
             "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js"
@@ -52,10 +50,10 @@ jobs:
             --rename-globals false \
             --reserved-names "fetch,Response,Request,caches"
 
-      - name: Deploy to Cloudflare
-        run: |
-          wrangler pages deploy _worker.js \
-            --project-name=hz123 \
-            --account-id=$CLOUDFLARE_ACCOUNT_ID \
-            --branch=main \
-            --commit-dirty
+      - name: Auto commit
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          branch: main
+          commit_message: ":rocket: auto update"
+          file_pattern: _worker.js
+          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
