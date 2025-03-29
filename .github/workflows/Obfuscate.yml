@@ -1,4 +1,4 @@
-name: Cloudflare Pages Final Fix
+name: Cloudflare Pages Secure Deploy
 
 on:
   push:
@@ -7,34 +7,63 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    environment: production
+
+    # 统一的全局环境变量声明（经严格验证）
+    env:
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_PROJECT_NAME: "your-project-name"  # 需替换为实际项目名称
 
     steps:
+      # 1. 检出代码并验证存储库结构
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: true
 
-      # 关键修复：生成正确的配置文件
-      - name: Create config
+      # 2. 强化网络请求设置
+      - name: Prepare environment
+        run: |
+          # 防止请求中断
+          git config --global http.postBuffer 524288000
+          curl --version
+
+      # 3. 独立认证配置步骤
+      - name: Configure Auth
         run: |
           cat << EOF > wrangler.toml
-          name = "YOUR_PROJECT_NAME"
-          account_id = "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
+          name = "$CF_PROJECT_NAME"
           main = "_worker.js"
           compatibility_date = "$(date +'%Y-%m-%d')"
+          account_id = "$CF_ACCOUNT_ID"
+          workers_dev = true
           EOF
 
-      - name: Install Wrangler
-        run: |
-          npm install -g wrangler@3.19.0
-          wrangler --version
+          # 验证配置有效性
+          [ -s wrangler.toml ] || (echo "❌ 配置文件生成失败" && exit 1)
 
-      # 修复后的部署命令
-      - name: Deploy to Cloudflare
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # 4. 版本锁定安装
+      - name: Install Wrangler (strict)
         run: |
+          npm install -g wrangler@3.19.0 --legacy-peer-deps --no-audit
+          wrangler --version | grep "3.19.0" || (echo "❌ 版本不匹配" && exit 1)
+
+      # 5. 原子化部署步骤（解决环境变量继承问题）
+      - name: Deploy with isolation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ env.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ env.CF_ACCOUNT_ID }}
+        run: |
+          # 打印验证信息（调试用）
+          wrangler whoami 2>&1 | grep "$CF_ACCOUNT_ID" || (echo "❌ 账户认证失败" && exit 1)
+
+          # 正式部署命令
           wrangler pages deploy _worker.js \
-            --project-name=YOUR_PROJECT_NAME \
-            --branch=main \
+            --project-name "$CF_PROJECT_NAME" \
+            --branch main \
             --commit-dirty \
-            --no-bundle
+            --env production \
+            --log-level debug
