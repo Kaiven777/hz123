@@ -1,4 +1,4 @@
-name: Cloudflare Worker Production
+name: Cloudflare Worker Final Deployment
 
 on:
   push:
@@ -10,21 +10,37 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Auth Precheck
-        env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # 1. 安装指定版本Wrangler
+      - name: Install Wrangler
         run: |
-          npm install -g wrangler@3.19.0
-          wrangler whoami || (echo "❌ 认证失败，请检查：" && exit 1)
+          npm install -g wrangler@3.19.0 --prefix=$HOME/.local --legacy-peer-deps
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          wrangler --version
 
-      - name: Deploy
-        env:
-          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # 2. 生成配置文件
+      - name: Create config
         run: |
+          cat << EOF > wrangler.toml
+          name = "bpb-worker"
+          main = "_worker.js"
+          compatibility_date = "$(date +'%Y-%m-%d')"
+          node_compat = true
+          EOF
+
+      # 3. 部署到Cloudflare
+      - name: Deploy to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          # 验证版本
+          wrangler --version
+          
+          # 执行部署
           wrangler pages deploy _worker.js \
             --project-name=your-project-name \
             --branch=main \
-            --commit-dirty
+            --commit-dirty \
+            --no-bundle
